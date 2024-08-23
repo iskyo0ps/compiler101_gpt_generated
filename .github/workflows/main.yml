@@ -1,0 +1,26 @@
+name: Create Issue with Prefix  
+  
+on:  
+  workflow_dispatch:  
+    inputs:  
+      issue_title:  
+        description: 'Title of the issue'  
+        required: true  
+      issue_body:  
+        description: 'Body of the issue'  
+        required: true  
+  
+jobs:  
+  create_issue:  
+    runs-on: ubuntu-latest  
+    steps:  
+      - name: Generate unique ID  
+        id: generate_id  
+        run: echo "::set-output name=id::$(date +%s)"  
+  
+      - name: Create GitHub Issue  
+        uses: peter-evans/create-issue-from-file@v3  
+        with:  
+          title: "SEDEV-${{ steps.generate_id.outputs.id }}: ${{ github.event.inputs.issue_title }}"  
+          body: "${{ github.event.inputs.issue_body }}"  
+
