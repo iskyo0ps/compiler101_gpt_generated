@@ -9,12 +9,13 @@ import torch
 import torchvision
 from PIL import Image
 from torchvision import transforms
+from torchvision.models import ResNet18_Weights  
 
 # 2. Load a Pretrained PyTorch Model
 # The script loads a pretrained ResNet-18 model from the torchvision library and sets it to evaluation mode:
 
 model_name = "resnet18"
-model = getattr(torchvision.models, model_name)(pretrained=True)
+model = getattr(torchvision.models, model_name)(weights=ResNet18_Weights.IMAGENET1K_V1)  
 model = model.eval()
 
 # 3. Trace the Model with TorchScript
@@ -49,11 +50,10 @@ mod, params = relay.frontend.from_pytorch(scripted_model, shape_list)
 
 # 6. Compile the Relay Graph
 # The Relay graph is compiled to an LLVM target:
-target = "llvm"
-target_host = "llvm"
+target = tvm.target.Target("llvm", host="llvm")  
 ctx = tvm.cpu(0)
 with tvm.transform.PassContext(opt_level=3):
-    lib = relay.build(mod, target=target, target_host=target_host, params=params)
+    lib = relay.build(mod, target=target)
 
 # 7. Execute the Compiled Model on TVM
 # The compiled model is executed on the TVM runtime, and the output is obtained:
