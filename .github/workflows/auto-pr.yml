@@ -1,0 +1,49 @@
+name: Auto PR and Merge  
+
+on:  
+  push:  
+    branches:  
+      - main  
+
+jobs:  
+  create-pr:  
+    runs-on: ubuntu-latest  
+    steps:  
+      - name: Checkout code  
+        uses: actions/checkout@v2  
+
+      - name: Create Pull Request  
+        id: create_pr  
+        uses: peter-evans/create-pull-request@v3  
+        with:  
+          token: ${{ secrets.GITHUB_TOKEN }}  
+          commit-message: "Auto PR for issue SWDEV-XXXXX"  
+          branch: auto-pr-branch  
+          title: "Auto PR for issue SWDEV-XXXXX"  
+          body: "This PR is automatically created for issue SWDEV-XXXXX"  
+
+  merge-pr:  
+    needs: create-pr  
+    runs-on: ubuntu-latest  
+    steps:  
+      - name: Merge Pull Request  
+        uses: actions/github-script@v3  
+        with:  
+          github-token: ${{ secrets.GITHUB_TOKEN }}  
+          script: |  
+            const { data: pullRequests } = await github.pulls.list({  
+              owner: context.repo.owner,  
+              repo: context.repo.repo,  
+              state: 'open',  
+              head: 'auto-pr-branch'  
+            });  
+
+            if (pullRequests.length > 0) {  
+              const pr = pullRequests[0];  
+              await github.pulls.merge({  
+                owner: context.repo.owner,  
+                repo: context.repo.repo,  
+                pull_number: pr.number,  
+                merge_method: 'merge'  
+              });  
+            }  
