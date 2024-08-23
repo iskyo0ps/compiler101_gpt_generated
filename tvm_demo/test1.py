@@ -1,35 +1,34 @@
+# 1. Import Necessary Libraries
+# The script starts by importing the necessary libraries for the task:
 import time
 import tvm
 from tvm import relay
-
 import numpy as np
-
 from tvm.contrib.download import download_testdata
-
-# PyTorch imports
 import torch
 import torchvision
+from PIL import Image
+from torchvision import transforms
 
-######################################################################
-# Load a pretrained PyTorch model
-# -------------------------------
+# 2. Load a Pretrained PyTorch Model
+# The script loads a pretrained ResNet-18 model from the torchvision library and sets it to evaluation mode:
+
 model_name = "resnet18"
 model = getattr(torchvision.models, model_name)(pretrained=True)
 model = model.eval()
 
-# We grab the TorchScripted model via tracing
+# 3. Trace the Model with TorchScript
+# The model is traced using TorchScript to convert it into a format that can be used by TVM:
 input_shape = [1, 3, 224, 224]
 input_data = torch.randn(input_shape)
 scripted_model = torch.jit.trace(model, input_data).eval()
 
-from PIL import Image
+# 4. Download and Preprocess an Image
+# An image is downloaded, resized, and preprocessed to match the input requirements of the model:
 
 img_url = "https://github.com/dmlc/mxnet.js/blob/main/data/cat.png?raw=true"
 img_path = download_testdata(img_url, "cat.png", module="data")
 img = Image.open(img_path).resize((224, 224))
-
-# Preprocess the image and convert to tensor
-from torchvision import transforms
 
 my_preprocess = transforms.Compose(
     [
@@ -40,55 +39,40 @@ my_preprocess = transforms.Compose(
     ]
 )
 img = my_preprocess(img)
-# 新增Batch维度
 img = np.expand_dims(img, 0)
 
-
-######################################################################
-# Import the graph to Relay
-# -------------------------
-# Convert PyTorch graph to Relay graph. The input name can be arbitrary.
+# 5. Convert the PyTorch Model to a Relay Graph
+# The TorchScript model is converted to a Relay graph, which is TVM's intermediate representation:
 input_name = "input0"
 shape_list = [(input_name, img.shape)]
 mod, params = relay.frontend.from_pytorch(scripted_model, shape_list)
 
-######################################################################
-# Relay Build
-# -----------
-# Compile the graph to llvm target with given input specification.
+# 6. Compile the Relay Graph
+# The Relay graph is compiled to an LLVM target:
 target = "llvm"
 target_host = "llvm"
 ctx = tvm.cpu(0)
 with tvm.transform.PassContext(opt_level=3):
     lib = relay.build(mod, target=target, target_host=target_host, params=params)
 
-######################################################################
-# Execute the portable graph on TVM
-# ---------------------------------
-# Now we can try deploying the compiled model on target.
-# from tvm.contrib import graph_runtime
+# 7. Execute the Compiled Model on TVM
+# The compiled model is executed on the TVM runtime, and the output is obtained:
+
 from tvm import runtime
 from tvm.contrib import graph_executor
-
 
 tvm_t0 = time.process_time()
 for i in range(10):
     dtype = "float32"
     m = graph_executor.GraphModule(lib["default"](ctx))
-    # Set inputs
     m.set_input(input_name, tvm.nd.array(img.astype(dtype)))
-    # Execute
     m.run()
-    # Get outputs
     tvm_output = m.get_output(0)
 tvm_t1 = time.process_time()
 
+# 8. Look Up Synset Names
+# The script downloads the synset names and class IDs to map the model's output to human-readable class names:
 
-
-#####################################################################
-# Look up synset name
-# -------------------
-# Look up prediction top 1 index in 1000 class synset.
 synset_url = "".join(
     [
         "https://raw.githubusercontent.com/Cadene/",
@@ -119,21 +103,26 @@ with open(class_path) as f:
 
 class_id_to_key = [x.strip() for x in class_id_to_key]
 
-# Get top-1 result for TVM
+# 9. Get Top-1 Prediction from TVM
+# The top-1 prediction from the TVM output is obtained and mapped to a class name:
+
 top1_tvm = np.argmax(tvm_output.asnumpy()[0])
 tvm_class_key = class_id_to_key[top1_tvm]
 
-# Convert input to PyTorch variable and get PyTorch result for comparison
+# 10. Compare with PyTorch
+# The same image is passed through the original PyTorch model to get the top-1 prediction for comparison:
+
 torch_t0 = time.process_time()
 for i in range(10):
     with torch.no_grad():
         torch_img = torch.from_numpy(img)
         output = model(torch_img)
-
-        # Get top-1 result for PyTorch
         top1_torch = np.argmax(output.numpy())
         torch_class_key = class_id_to_key[top1_torch]
 torch_t1 = time.process_time()
+
+# 11. Measure and Print Execution Time
+# The execution time for both TVM and PyTorch is measured and printed:
 
 tvm_time = tvm_t1 - tvm_t0
 torch_time = torch_t1 - torch_t0
