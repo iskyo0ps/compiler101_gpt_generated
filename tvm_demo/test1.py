@@ -9,13 +9,14 @@ import torch
 import torchvision
 from PIL import Image
 from torchvision import transforms
-from torchvision.models import ResNet18_Weights  
+from torchvision.models import ResNet18_Weights
+from tvm import autotvm
 
 # 2. Load a Pretrained PyTorch Model
 # The script loads a pretrained ResNet-18 model from the torchvision library and sets it to evaluation mode:
 
 model_name = "resnet18"
-model = getattr(torchvision.models, model_name)(weights=ResNet18_Weights.IMAGENET1K_V1)  
+model = getattr(torchvision.models, model_name)(weights=ResNet18_Weights.IMAGENET1K_V1)
 model = model.eval()
 
 # 3. Trace the Model with TorchScript
@@ -50,10 +51,40 @@ mod, params = relay.frontend.from_pytorch(scripted_model, shape_list)
 
 # 6. Compile the Relay Graph
 # The Relay graph is compiled to an LLVM target:
-target = tvm.target.Target("llvm", host="llvm")  
+target = tvm.target.Target("llvm", host="llvm")
 ctx = tvm.cpu(0)
-with tvm.transform.PassContext(opt_level=3):
-    lib = relay.build(mod, target=target)
+# Define the tuning options
+tuning_option = {
+    'log_filename': 'tuning.log',
+    'tuner': 'xgb',
+    'n_trial': 1000,
+    'early_stopping': 600,
+    'measure_option': autotvm.measure_option(
+        builder=autotvm.LocalBuilder(),
+        runner=autotvm.LocalRunner(number=10, repeat=1, min_repeat_ms=1000),
+    ),
+}
+
+# Extract tasks from the Relay program
+tasks = autotvm.task.extract_from_program(mod["main"], target="llvm", params=params)
+
+# Tune the extracted tasks
+for i, task in enumerate(tasks):
+    prefix = "[Task %2d/%2d] " % (i+1, len(tasks))
+    tuner = autotvm.tuner.XGBTuner(task)
+    tuner.tune(n_trial=min(tuning_option['n_trial'], len(task.config_space)),
+               early_stopping=tuning_option['early_stopping'],
+               measure_option=tuning_option['measure_option'],
+               callbacks=[
+                   autotvm.callback.progress_bar(tuning_option['n_trial'], prefix=prefix),
+                   autotvm.callback.log_to_file(tuning_option['log_filename'])
+               ])
+
+# Apply the best schedules
+with autotvm.apply_history_best(tuning_option['log_filename']):
+    with tvm.transform.PassContext(opt_level=3):
+        lib = relay.build(mod, target="llvm", params=params)
+
 
 # 7. Execute the Compiled Model on TVM
 # The compiled model is executed on the TVM runtime, and the output is obtained:
